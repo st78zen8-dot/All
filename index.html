@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>血糖値コントロール作戦</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #241226;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #app {
+    width: 100vw;
+    height: 100svh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: linear-gradient(180deg, #33152d 0%, #190b22 100%);
+  }
+  #screen {
+    position: relative;
+    width: min(100vw, calc(100svh * 9 / 16));
+    height: min(100svh, calc(100vw * 16 / 9));
+    max-width: 100vw;
+    max-height: 100svh;
+    background: #5c1831;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+  }
+  #hud {
+    position: absolute;
+    top: max(10px, env(safe-area-inset-top));
+    left: 10px;
+    right: 10px;
+    z-index: 3;
+    display: flex;
+    gap: 6px;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  .hudBox {
+    min-width: 30%;
+    padding: 7px 8px;
+    border-radius: 13px;
+    background: rgba(52, 12, 31, 0.58);
+    border: 1px solid rgba(255,255,255,0.22);
+    text-align: center;
+    color: #fff8eb;
+    font-size: clamp(11px, 3.2vw, 15px);
+    font-weight: 800;
+    line-height: 1.25;
+  }
+  #fire {
+    position: absolute;
+    z-index: 4;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(22px, calc(env(safe-area-inset-bottom) + 10px));
+    width: clamp(78px, 22vw, 104px);
+    height: clamp(78px, 22vw, 104px);
+    border: 3px solid rgba(255,255,255,.82);
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 28%, #fffbd5, #ffd96b 48%, #f39839 100%);
+    color: #573000;
+    font-weight: 900;
+    font-size: clamp(12px, 3.6vw, 17px);
+    box-shadow: 0 7px 16px rgba(0,0,0,.34);
+    touch-action: manipulation;
+  }
+  #fire.pressed { transform: scale(.94); }
+  #exercise {
+    position: absolute;
+    z-index: 4;
+    left: max(14px, env(safe-area-inset-left));
+    bottom: max(22px, calc(env(safe-area-inset-bottom) + 10px));
+    width: clamp(78px, 22vw, 104px);
+    height: clamp(78px, 22vw, 104px);
+    border: 3px solid rgba(255,255,255,.82);
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 28%, #eaffda, #91e486 48%, #32ad78 100%);
+    color: #083b28;
+    font-weight: 900;
+    font-size: clamp(12px, 3.6vw, 17px);
+    line-height: 1.25;
+    box-shadow: 0 7px 16px rgba(0,0,0,.34);
+    touch-action: manipulation;
+  }
+  #exercise.active {
+    transform: scale(.96);
+    box-shadow: 0 0 18px rgba(141,255,143,.85);
+  }
+  #exercise:disabled {
+    opacity: .68;
+  }
+  .overlay {
+    position: absolute;
+    z-index: 9;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: rgba(25, 6, 25, .72);
+  }
+  #result { display: none; }
+  .panel {
+    width: 100%;
+    max-width: 390px;
+    padding: 22px 16px;
+    border-radius: 22px;
+    background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.27);
+    text-align: center;
+    color: #fffaf0;
+    backdrop-filter: blur(8px);
+  }
+  h1 {
+    font-size: clamp(26px, 8vw, 38px);
+    line-height: 1.25;
+    margin: 0 0 14px;
+    color: #fff3b4;
+  }
+  p {
+    font-size: clamp(14px, 4vw, 17px);
+    line-height: 1.65;
+    margin: 7px 0;
+  }
+  .note { font-size: clamp(12px, 3.2vw, 14px); color: #f5e7d3; }
+  .mainBtn {
+    margin-top: 18px;
+    padding: 12px 30px;
+    min-width: 180px;
+    border: none;
+    border-radius: 999px;
+    background: #ffe079;
+    color: #492200;
+    font-size: 19px;
+    font-weight: 900;
+    box-shadow: 0 6px 13px rgba(0,0,0,.27);
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="screen">
+    <canvas id="game"></canvas>
+    <div id="hud">
+      <div class="hudBox" id="score">スコア<br>0</div>
+      <div class="hudBox" id="glucose">血糖値<br>100</div>
+      <div class="hudBox" id="timer">残り<br>60秒</div>
+    </div>
+    <button id="exercise" aria-label="運動する">運動</button>
+    <button id="fire" aria-label="インスリンを出す">インスリン</button>
+
+    <div class="overlay" id="start">
+      <div class="panel">
+        <h1>血糖値<br>コントロール作戦</h1>
+        <p>あなたは<strong>膵臓</strong>です。<br>流れてくる糖にインスリンを届けて、細胞へ取り込ませましょう。</p>
+        <p class="note">画面下部を指で左右になぞる：膵臓を移動<br>右下：インスリンを出す　左下：運動する<br><br>糖を取り逃すと内臓脂肪が増加。<br>運動すると筋肉が糖を利用し、血糖値が下がります。</p>
+        <p class="note"><strong>血糖値の学習表示</strong><br>低血糖：70 mg/dL以下<br>糖尿病型：空腹時126 mg/dL以上、随時200 mg/dL以上<br>※実際の診断は医療機関で行います。</p>
+        <button class="mainBtn" id="startBtn">スタート</button>
+      </div>
+    </div>
+
+    <div class="overlay" id="result">
+      <div class="panel">
+        <h1 id="resultTitle">結果</h1>
+        <p id="resultText"></p>
+        <button class="mainBtn" id="retryBtn">もう一度</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const screen = document.getElementById("screen");
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const scoreEl = document.getElementById("score");
+  const glucoseEl = document.getElementById("glucose");
+  const timerEl = document.getElementById("timer");
+  const fireBtn = document.getElementById("fire");
+  const exerciseBtn = document.getElementById("exercise");
+  const startOverlay = document.getElementById("start");
+  const resultOverlay = document.getElementById("result");
+  const resultTitle = document.getElementById("resultTitle");
+  const resultText = document.getElementById("resultText");
+
+  let W = 540, H = 960, ratio = 1;
+  let animationId = null;
+
+  const game = {
+    running: false,
+    ended: false,
+    score: 0,
+    glucose: 100,
+    seconds: 60,
+    last: 0,
+    sugarClock: 0,
+    chartClock: 0,
+    cooldown: 0,
+    chart: [],
+    visceralFat: 0,
+    alertText: "",
+    alertLife: 0,
+    exercise: 0,
+    exerciseCooldown: 0,
+    exercisePulse: 0
+  };
+
+  const pancreas = { x: 270, y: 820, targetX: 270, w: 94, h: 55 };
+  let sugars = [];
+  let bullets = [];
+  let captures = [];
+  let particles = [];
+
+  function resize() {
+    const r = screen.getBoundingClientRect();
+    ratio = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.floor(r.width * ratio);
+    canvas.height = Math.floor(r.height * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    W = r.width;
+    H = r.height;
+    pancreas.y = H * 0.82;
+    pancreas.x = Math.max(pancreas.w / 2 + 8, Math.min(W - pancreas.w / 2 - 8, pancreas.x));
+    pancreas.targetX = pancreas.x;
+    draw();
+  }
+
+  window.addEventListener("resize", resize);
+  resize();
+
+  function startGame() {
+    if (animationId) cancelAnimationFrame(animationId);
+    game.running = true;
+    game.ended = false;
+    game.score = 0;
+    game.glucose = 100;
+    game.seconds = 60;
+    game.last = performance.now();
+    game.sugarClock = 0.35;
+    game.chartClock = 0;
+    game.cooldown = 0;
+    game.visceralFat = 0;
+    game.alertText = "";
+    game.alertLife = 0;
+    game.exercise = 0;
+    game.exerciseCooldown = 0;
+    game.exercisePulse = 0;
+    game.chart = Array(24).fill(100);
+    exerciseBtn.textContent = "運動";
+    exerciseBtn.disabled = false;
+    exerciseBtn.classList.remove("active");
+    sugars = [];
+    bullets = [];
+    captures = [];
+    particles = [];
+    pancreas.x = W / 2;
+    pancreas.targetX = W / 2;
+    startOverlay.style.display = "none";
+    resultOverlay.style.display = "none";
+    updateHUD();
+    animationId = requestAnimationFrame(loop);
+  }
+
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("retryBtn").addEventListener("click", startGame);
+
+  function localX(event) {
+    const rect = canvas.getBoundingClientRect();
+    return event.clientX - rect.left;
+  }
+
+  function movePancreas(event) {
+    if (!game.running) return;
+    const x = localX(event);
+    const minimum = pancreas.w / 2 + 8;
+    const maximum = W - pancreas.w / 2 - 8;
+    pancreas.targetX = Math.max(minimum, Math.min(maximum, x));
+  }
+
+  canvas.addEventListener("pointerdown", e => {
+    if (e.clientY > canvas.getBoundingClientRect().top + H * 0.60) {
+      canvas.setPointerCapture(e.pointerId);
+      movePancreas(e);
+    }
+  });
+  canvas.addEventListener("pointermove", e => {
+    if (e.buttons > 0 || e.pointerType === "touch") movePancreas(e);
+  });
+
+  function fireInsulin(event) {
+    if (event) event.preventDefault();
+    if (!game.running || game.cooldown > 0) return;
+    bullets.push({
+      x: pancreas.x,
+      y: pancreas.y - pancreas.h * 0.5,
+      speed: H * 0.83,
+      r: Math.max(8, W * 0.024)
+    });
+    game.cooldown = 0.20;
+    game.glucose = Math.max(45, game.glucose - 1.4);
+    makeParticles(pancreas.x, pancreas.y - 20, "#ffe482", 6);
+    fireBtn.classList.add("pressed");
+    setTimeout(() => fireBtn.classList.remove("pressed"), 80);
+  }
+
+  fireBtn.addEventListener("pointerdown", fireInsulin);
+
+  function startExercise(event) {
+    if (event) event.preventDefault();
+    if (!game.running || game.exerciseCooldown > 0 || game.exercise > 0) return;
+    game.exercise = 5.5;
+    game.exerciseCooldown = 12;
+    game.exercisePulse = 0.05;
+    showAlert("運動中：筋肉がブドウ糖を利用");
+    exerciseBtn.classList.add("active");
+  }
+
+  exerciseBtn.addEventListener("pointerdown", startExercise);
+
+  function spawnSugar() {
+    const isGlucose = Math.random() < 0.60;
+    const margin = W * 0.13;
+    sugars.push({
+      x: margin + Math.random() * (W - margin * 2),
+      y: -35,
+      speed: H * (0.16 + Math.random() * 0.06 + (60 - game.seconds) * 0.0011),
+      radius: isGlucose ? W * 0.055 : W * 0.048,
+      type: isGlucose ? "ブドウ糖" : "果糖",
+      color: isGlucose ? "#ffe06a" : "#ff9bc7",
+      rise: isGlucose ? 9 : 12,
+      phase: Math.random() * 6.28
+    });
+  }
+
+  function makeParticles(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 35 + Math.random() * 85;
+      particles.push({
+        x, y, color,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s,
+        life: .42 + Math.random() * .35
+      });
+    }
+  }
+
+  function insulinEffectiveness() {
+    let base = 1.00;
+    if (game.visceralFat >= 75) base = 0.34;
+    else if (game.visceralFat >= 50) base = 0.54;
+    else if (game.visceralFat >= 25) base = 0.76;
+    if (game.exercise > 0) base = Math.min(1.00, base + 0.20);
+    return base;
+  }
+
+  function fatCondition() {
+    if (game.visceralFat < 25) return "良好";
+    if (game.visceralFat < 50) return "やや効きにくい";
+    if (game.visceralFat < 75) return "効きにくい";
+    return "とても効きにくい";
+  }
+
+  function showAlert(text) {
+    game.alertText = text;
+    game.alertLife = 1.15;
+  }
+
+  function catchSugar(s) {
+    const success = Math.random() <= insulinEffectiveness();
+    const side = s.x < W / 2 ? "left" : "right";
+
+    if (!success) {
+      captures.push({ x: s.x, y: s.y, side, color: "#d6cbc1", life: .85, text: "効きにくい！", failed: true });
+      makeParticles(s.x, s.y, "#cbb8ab", 10);
+      showAlert("内臓脂肪が多く、インスリン抵抗性が上昇");
+      return false;
+    }
+
+    game.score += s.type === "ブドウ糖" ? 10 : 13;
+    game.glucose = Math.max(55, game.glucose - s.rise * .65);
+    captures.push({ x: s.x, y: s.y, side, color: s.color, life: .55, text: "細胞へ", failed: false });
+    makeParticles(s.x, s.y, s.color, 15);
+    return true;
+  }
+
+  function update(dt) {
+    game.seconds -= dt;
+    game.cooldown = Math.max(0, game.cooldown - dt);
+    game.alertLife = Math.max(0, game.alertLife - dt);
+    game.exerciseCooldown = Math.max(0, game.exerciseCooldown - dt);
+    pancreas.x += (pancreas.targetX - pancreas.x) * Math.min(1, dt * 15);
+
+    if (game.exercise > 0) {
+      game.exercise = Math.max(0, game.exercise - dt);
+      game.glucose = Math.max(45, game.glucose - dt * 2.1);
+      game.visceralFat = Math.max(0, game.visceralFat - dt * 1.25);
+      game.exercisePulse -= dt;
+
+      if (game.exercisePulse <= 0) {
+        if (sugars.length > 0) {
+          let targetIndex = 0;
+          for (let i = 1; i < sugars.length; i++) {
+            if (sugars[i].y > sugars[targetIndex].y) targetIndex = i;
+          }
+          const s = sugars[targetIndex];
+          captures.push({ x: s.x, y: s.y, side: s.x < W / 2 ? "left" : "right", color: "#a6f591", life: .72, text: "筋肉で利用", failed: false });
+          makeParticles(s.x, s.y, "#a6f591", 16);
+          sugars.splice(targetIndex, 1);
+          game.score += 5;
+          game.glucose = Math.max(50, game.glucose - 1.2);
+        }
+        game.exercisePulse = .90;
+      }
+
+      if (game.exercise <= 0) {
+        exerciseBtn.classList.remove("active");
+        showAlert("運動終了：筋肉による糖の利用が落ち着きました");
+      }
+    }
+
+    game.sugarClock -= dt;
+    if (game.sugarClock <= 0) {
+      spawnSugar();
+      const elapsed = 60 - game.seconds;
+      game.sugarClock = Math.max(.40, .95 - elapsed * .008) + Math.random() * .25;
+    }
+
+    game.chartClock -= dt;
+    if (game.chartClock <= 0) {
+      game.chart.push(game.glucose);
+      if (game.chart.length > 45) game.chart.shift();
+      game.chartClock = .45;
+    }
+
+    sugars.forEach(s => {
+      s.y += s.speed * dt;
+      s.phase += dt * 4;
+      s.x += Math.sin(s.phase) * .25;
+    });
+    bullets.forEach(b => b.y -= b.speed * dt);
+
+    for (let bi = bullets.length - 1; bi >= 0; bi--) {
+      let hit = false;
+      for (let si = sugars.length - 1; si >= 0; si--) {
+        const b = bullets[bi], s = sugars[si];
+        const d = Math.hypot(b.x - s.x, b.y - s.y);
+        if (d < b.r + s.radius) {
+          const takenIntoCell = catchSugar(s);
+          if (takenIntoCell) {
+            sugars.splice(si, 1);
+          } else {
+            s.y += H * .025;
+            s.speed *= 1.08;
+          }
+          bullets.splice(bi, 1);
+          hit = true;
+          break;
+        }
+      }
+      if (hit) continue;
+    }
+
+    for (let i = sugars.length - 1; i >= 0; i--) {
+      if (sugars[i].y > H + 35) {
+        game.glucose += sugars[i].rise;
+        const fatGain = sugars[i].type === "果糖" ? 12 : 9;
+        game.visceralFat = Math.min(100, game.visceralFat + fatGain);
+        makeParticles(sugars[i].x, H - 10, "#ff5f6b", 9);
+        showAlert("取り込めなかった糖 → 内臓脂肪が増加");
+        sugars.splice(i, 1);
+      }
+    }
+
+    bullets = bullets.filter(b => b.y > -35);
+    captures.forEach(c => {
+      c.life -= dt;
+      c.x += (c.side === "left" ? -1 : 1) * W * .42 * dt;
+      c.y += H * .02 * dt;
+    });
+    captures = captures.filter(c => c.life > 0);
+    particles.forEach(p => {
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= .95;
+      p.vy *= .95;
+    });
+    particles = particles.filter(p => p.life > 0);
+
+    if (game.glucose >= 200) endGame(false, "血糖値が200mg/dL以上になりました。糖が血管内に多く残っています。");
+    else if (game.glucose <= 70) endGame(false, "血糖値が70mg/dL以下になり、低血糖の状態です。");
+    else if (game.seconds <= 0) {
+      const clear = game.glucose >= 80 && game.glucose <= 140;
+      endGame(clear, clear
+        ? "血糖値を安定させ、細胞へ糖を届けることができました。"
+        : "終了時の血糖値を80〜140に保つとクリアです。");
+    }
+    updateHUD();
+  }
+
+  function updateHUD() {
+    scoreEl.innerHTML = "スコア<br>" + game.score;
+    glucoseEl.innerHTML = "血糖値<br>" + Math.round(game.glucose);
+    timerEl.innerHTML = "残り<br>" + Math.max(0, Math.ceil(game.seconds)) + "秒";
+    if (game.exercise > 0) {
+      exerciseBtn.innerHTML = "運動中<br>" + Math.ceil(game.exercise) + "秒";
+      exerciseBtn.disabled = false;
+    } else if (game.exerciseCooldown > 0) {
+      exerciseBtn.innerHTML = "回復中<br>" + Math.ceil(game.exerciseCooldown) + "秒";
+      exerciseBtn.disabled = true;
+    } else {
+      exerciseBtn.textContent = "運動";
+      exerciseBtn.disabled = false;
+    }
+  }
+
+  function endGame(clear, message) {
+    if (game.ended) return;
+    game.running = false;
+    game.ended = true;
+    resultTitle.textContent = clear ? "ゲームクリア" : "ゲームオーバー";
+    resultText.innerHTML = message + "<br><br>スコア：" + game.score +
+      "<br>最終血糖値：" + Math.round(game.glucose) +
+      "<br>内臓脂肪：" + Math.round(game.visceralFat) +
+      "<br>インスリンの効き：" + Math.round(insulinEffectiveness() * 100) + "%" +
+      "<br><br><span style='font-size:0.86em'>運動では、使われた筋肉が糖を利用し、血糖値が下がりやすくなります。</span>";
+    resultOverlay.style.display = "grid";
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawBloodVessel() {
+    const grad = ctx.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0, "#401128");
+    grad.addColorStop(.16, "#a52b48");
+    grad.addColorStop(.5, "#c23d54");
+    grad.addColorStop(.84, "#a52b48");
+    grad.addColorStop(1, "#401128");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = "rgba(255, 193, 194, .20)";
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(W * .12, H * .18, W * .07, H * .40);
+    ctx.quadraticCurveTo(W * .02, H * .72, 0, H);
+    ctx.lineTo(0, 0);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(W, 0);
+    ctx.quadraticCurveTo(W * .88, H * .18, W * .93, H * .40);
+    ctx.quadraticCurveTo(W * .98, H * .72, W, H);
+    ctx.lineTo(W, 0);
+    ctx.fill();
+
+    ctx.save();
+    ctx.globalAlpha = .10;
+    ctx.strokeStyle = "#ffe7dd";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 9; i++) {
+      const y = (i * H / 8 + performance.now() * .018) % (H + 70) - 35;
+      ctx.beginPath();
+      ctx.moveTo(W * .14, y);
+      ctx.lineTo(W * .86, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawCells() {
+    const left = { x: W * .035, y: H * .44 };
+    const right = { x: W * .965, y: H * .58 };
+    const resistant = game.visceralFat >= 25;
+    [left, right].forEach((c, index) => {
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      ctx.fillStyle = resistant ? "rgba(177, 177, 128, .62)" : "rgba(173, 241, 139, .64)";
+      ctx.strokeStyle = resistant ? "rgba(255,206,120,.92)" : "rgba(238,255,214,.85)";
+      ctx.lineWidth = resistant ? 5 : 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, W * .10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#efffe4";
+      ctx.font = `800 ${Math.max(11, W * .030)}px sans-serif`;
+      ctx.textAlign = index === 0 ? "left" : "right";
+      ctx.fillText("細胞", index === 0 ? 10 : -10, 4);
+      if (resistant) {
+        ctx.fillStyle = "#ffe5a8";
+        ctx.font = `800 ${Math.max(9, W * .024)}px sans-serif`;
+        ctx.fillText("抵抗性↑", index === 0 ? 9 : -9, W * .12);
+      }
+      ctx.restore();
+    });
+  }
+
+  function drawVisceralFat() {
+    const count = Math.floor(game.visceralFat / 8);
+    for (let i = 0; i < count; i++) {
+      const leftSide = i % 2 === 0;
+      const col = Math.floor(i / 2) % 3;
+      const row = Math.floor(i / 6);
+      const x = leftSide ? W * (.09 + col * .045) : W * (.91 - col * .045);
+      const y = H * (.69 - row * .038);
+      const r = W * (.024 + Math.min(game.visceralFat, 100) * .00007);
+      ctx.save();
+      ctx.fillStyle = "rgba(248, 198, 85, .82)";
+      ctx.strokeStyle = "rgba(255, 235, 156, .9)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawFatGauge() {
+    const x = 10, y = H * .218, w = W - 20, h = H * .050;
+    const barX = x + 8, barY = y + h * .55, barW = w - 16, barH = Math.max(9, h * .25);
+    ctx.save();
+    ctx.fillStyle = "rgba(40,10,22,.55)";
+    roundRect(x, y, w, h, 10);
+    ctx.fill();
+
+    ctx.fillStyle = "#fff1ca";
+    ctx.font = `800 ${Math.max(10, W * .027)}px sans-serif`;
+    const activityMark = game.exercise > 0 ? "　運動効果あり" : "";
+    ctx.fillText("内臓脂肪 " + Math.round(game.visceralFat) + "　効き " + Math.round(insulinEffectiveness() * 100) + "%" + activityMark, x + 9, y + h * .38);
+
+    ctx.fillStyle = "rgba(255,255,255,.18)";
+    roundRect(barX, barY, barW, barH, barH / 2);
+    ctx.fill();
+    if (game.visceralFat > 0) {
+      const fillW = Math.max(barH, barW * game.visceralFat / 100);
+      const gradient = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+      gradient.addColorStop(0, "#ffd767");
+      gradient.addColorStop(.65, "#ff984c");
+      gradient.addColorStop(1, "#ef4242");
+      ctx.fillStyle = gradient;
+      roundRect(barX, barY, fillW, barH, barH / 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawChart() {
+    const x = 10, y = H * .105, w = W * .42, h = H * .10;
+    ctx.save();
+    ctx.fillStyle = "rgba(40,10,22,.48)";
+    roundRect(x, y, w, h, 10);
+    ctx.fill();
+
+    const getY = value => y + h - ((value - 50) / 150) * (h - 16) - 7;
+    ctx.fillStyle = "rgba(167,255,142,.15)";
+    const top = getY(140), bottom = getY(80);
+    ctx.fillRect(x + 7, top, w - 14, bottom - top);
+
+    ctx.strokeStyle = "#ffe272";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    game.chart.forEach((v, i) => {
+      const px = x + 7 + (i / Math.max(1, game.chart.length - 1)) * (w - 14);
+      const py = getY(Math.max(50, Math.min(200, v)));
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    });
+    ctx.stroke();
+    ctx.fillStyle = "#fff6d8";
+    ctx.font = `700 ${Math.max(10, W * .027)}px sans-serif`;
+    ctx.fillText("血糖値", x + 9, y + 14);
+    ctx.restore();
+  }
+
+  function drawReferenceValues() {
+    const x = 10, y = H * .276, w = W - 20, h = H * .064;
+    ctx.save();
+    ctx.fillStyle = "rgba(40,10,22,.56)";
+    roundRect(x, y, w, h, 10);
+    ctx.fill();
+    ctx.fillStyle = "#fff0cd";
+    ctx.font = `800 ${Math.max(10, W * .026)}px sans-serif`;
+    ctx.fillText("血糖値の目安（mg/dL）", x + 9, y + h * .33);
+    ctx.fillStyle = "#bceca6";
+    ctx.fillText("ゲーム目標 70～140", x + 9, y + h * .74);
+    ctx.fillStyle = "#a9d5ff";
+    ctx.fillText("低血糖 ≤70", x + w * .46, y + h * .74);
+    ctx.fillStyle = "#ffb894";
+    ctx.fillText("高血糖 ≥200", x + w * .72, y + h * .74);
+    ctx.restore();
+  }
+
+  function drawMuscle() {
+    if (game.exercise <= 0) return;
+    const pulse = 1 + Math.sin(performance.now() * .012) * .08;
+    ctx.save();
+    ctx.translate(W * .50, H * .73);
+    ctx.scale(pulse, pulse);
+    ctx.globalAlpha = .82;
+    ctx.fillStyle = "rgba(105, 221, 126, .36)";
+    ctx.strokeStyle = "rgba(199,255,191,.88)";
+    ctx.lineWidth = 3;
+    roundRect(-W * .22, -H * .035, W * .44, H * .070, 18);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#eaffdb";
+    ctx.font = `900 ${Math.max(12, W * .032)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("筋肉がブドウ糖を利用中", 0, 5);
+    ctx.restore();
+  }
+
+  function drawSugar(s) {
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.fillStyle = s.color;
+    ctx.strokeStyle = "#fff5dd";
+    ctx.lineWidth = 2;
+    if (s.type === "ブドウ糖") {
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = Math.PI / 6 + i * Math.PI / 3;
+        const px = Math.cos(a) * s.radius, py = Math.sin(a) * s.radius;
+        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      }
+      ctx.closePath();
+    } else {
+      ctx.beginPath();
+      ctx.arc(0, 0, s.radius, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#55270b";
+    ctx.font = `800 ${Math.max(10, W * .029)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(s.type, 0, s.radius + 17);
+    ctx.restore();
+  }
+
+  function drawBullet(b) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.fillStyle = "#ffe580";
+    ctx.strokeStyle = "#fff9d6";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, b.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#6a3a00";
+    ctx.font = `900 ${Math.max(10, b.r * 1.05)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("I", 0, 1);
+    ctx.restore();
+  }
+
+  function drawPancreas() {
+    ctx.save();
+    ctx.translate(pancreas.x, pancreas.y);
+    ctx.fillStyle = "#f2a661";
+    ctx.strokeStyle = "#ffe1bf";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, pancreas.w * .52, pancreas.h * .48, -.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ffc27a";
+    ctx.beginPath();
+    ctx.ellipse(-pancreas.w * .16, -pancreas.h * .12, pancreas.w * .28, pancreas.h * .24, .25, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff4df";
+    ctx.font = `800 ${Math.max(13, W * .037)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("膵臓", 0, pancreas.h * .85);
+    ctx.restore();
+  }
+
+  function drawEffects() {
+    captures.forEach(c => {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, c.life / .55);
+      ctx.fillStyle = c.color;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, W * .025, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = c.failed ? "#ffe39f" : "#e8ffd0";
+      ctx.font = `800 ${Math.max(10, W * .032)}px sans-serif`;
+      ctx.fillText(c.text, c.x - 24, c.y - 18);
+      ctx.restore();
+    });
+    particles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, p.life / .5);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, W * .009, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  function drawAlert() {
+    if (game.alertLife <= 0) return;
+    const alpha = Math.min(1, game.alertLife * 1.5);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = "rgba(60, 15, 20, .75)";
+    roundRect(W * .06, H * .355, W * .88, H * .053, 12);
+    ctx.fill();
+    ctx.fillStyle = "#fff0b0";
+    ctx.font = `900 ${Math.max(12, W * .034)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(game.alertText, W / 2, H * .389);
+    ctx.restore();
+  }
+
+  function draw() {
+    drawBloodVessel();
+    drawVisceralFat();
+    drawCells();
+    drawChart();
+    drawFatGauge();
+    drawReferenceValues();
+    drawMuscle();
+    sugars.forEach(drawSugar);
+    bullets.forEach(drawBullet);
+    drawEffects();
+    drawPancreas();
+    drawAlert();
+
+    if (game.running && (game.glucose > 150 || game.glucose < 70)) {
+      ctx.save();
+      ctx.globalAlpha = .13;
+      ctx.fillStyle = game.glucose > 150 ? "#ff2929" : "#4a9dff";
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+  }
+
+  function loop(now) {
+    if (!game.running) {
+      draw();
+      return;
+    }
+    const dt = Math.min(.034, (now - game.last) / 1000);
+    game.last = now;
+    update(dt);
+    draw();
+    if (game.running) animationId = requestAnimationFrame(loop);
+  }
+
+  game.chart = Array(24).fill(100);
+  draw();
+})();
+</script>
+</body>
+</html>
