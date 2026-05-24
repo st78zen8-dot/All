@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>血糖値コントロール作戦</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;background:#1d0c1b;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif}
+#app{width:100vw;height:100svh;display:grid;place-items:center;background:#1d0c1b}
+#screen{position:relative;width:min(100vw,calc(100svh * 9 / 16));height:min(100svh,calc(100vw * 16 / 9));overflow:hidden;background:#681b36}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#hud{position:absolute;top:max(8px,env(safe-area-inset-top));left:8px;right:8px;z-index:3;pointer-events:none}
+#hudTop{height:44px;border-radius:14px;background:rgba(37,8,23,.64);border:1px solid rgba(255,255,255,.16);display:flex;align-items:center;justify-content:space-around;color:#fff9ef}
+.stat{text-align:center;font-weight:800;font-size:11px;line-height:1.15;min-width:23%}
+.stat span{display:block;font-size:16px;color:#fff1a2;margin-top:2px}
+#miniInfo{margin-top:5px;padding:5px 9px 6px;border-radius:11px;background:rgba(37,8,23,.56);border:1px solid rgba(255,255,255,.12);color:#fff3dd;font-size:11px;font-weight:750}
+#line1{display:flex;justify-content:space-between;align-items:center;gap:7px}
+#fatBar{margin-top:4px;width:100%;height:6px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,.18)}
+#fatFill{height:100%;width:0%;border-radius:999px;background:linear-gradient(90deg,#ffd05b,#ff933d,#e7423b);transition:width .16s linear}
+#glucoseGraphLabel{display:none}
+#controls{position:absolute;left:0;right:0;bottom:max(12px,calc(env(safe-area-inset-bottom) + 6px));z-index:5;display:flex;justify-content:flex-end;align-items:center;gap:8px;padding-right:max(10px,env(safe-area-inset-right))}
+.action{width:82px;height:82px;border-radius:50%;border:3px solid rgba(255,255,255,.84);font-size:14px;font-weight:900;line-height:1.15;box-shadow:0 7px 17px rgba(0,0,0,.31);touch-action:manipulation}
+#exercise{background:radial-gradient(circle at 32% 25%,#f0ffe5,#95e68b 46%,#2ba671);color:#083b25}
+#exercise.active{box-shadow:0 0 18px rgba(123,247,141,.9);transform:scale(.95)}
+#exercise:disabled{opacity:.62}
+#fire{background:radial-gradient(circle at 32% 25%,#fffde0,#ffdc70 46%,#f19737);color:#573000}
+#fire.pressed{transform:scale(.94)}
+.overlay{position:absolute;inset:0;z-index:10;display:grid;place-items:center;padding:17px;background:rgba(20,5,20,.77)}
+#result{display:none}
+.panel{width:100%;max-width:390px;padding:22px 18px 20px;border-radius:22px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.24);color:#fffaf1;text-align:center;backdrop-filter:blur(7px)}
+h1{font-size:clamp(27px,8vw,37px);color:#fff0a5;line-height:1.22;margin:0 0 13px}
+p{font-size:clamp(14px,3.8vw,17px);line-height:1.58;margin:8px 0}
+.note{font-size:clamp(12px,3.15vw,14px);color:#f4e6d3}
+.rule{padding:9px 7px;border-radius:12px;background:rgba(25,5,18,.27);margin:12px 0 0}
+.mainBtn{margin-top:17px;min-width:176px;padding:12px 28px;border:0;border-radius:999px;background:#ffdf75;color:#482200;font-weight:900;font-size:18px;box-shadow:0 6px 13px rgba(0,0,0,.25)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="screen">
+    <canvas id="game"></canvas>
+
+    <div id="hud">
+      <div id="hudTop">
+        <div class="stat">スコア<span id="score">0</span></div>
+        <div class="stat">ベスト<span id="highScore">0</span></div>
+        <div class="stat">血糖値<span id="glucose">100</span></div>
+        <div class="stat">残り<span id="timer">60秒</span></div>
+      </div>
+      <div id="miniInfo">
+        <div id="line1"><span id="fatText">内臓脂肪 0</span><span id="effectText">インスリン抵抗性 なし</span></div>
+        <div id="fatBar"><div id="fatFill"></div></div>
+ 
+      </div>
+    </div>
+    <div id="glucoseGraphLabel">血糖値の推移（mg/dL）</div>
+
+    <div id="controls">
+      <button id="exercise" class="action" aria-label="運動する">運動</button>
+      <button id="fire" class="action" aria-label="インスリンを出す">インスリン</button>
+    </div>
+
+    <div id="start" class="overlay">
+      <div class="panel">
+        <h1>血糖値<br>コントロール作戦</h1>
+        <p>あなたは<strong>膵臓</strong>です。<br>流れてくる<strong>ブドウ糖</strong>・<strong>果糖</strong>にインスリンを届け、細胞へ取り込ませましょう。</p>
+        <p class="note">画面左側を左右になぞる：膵臓を移動<br>右下のボタン：運動／インスリン</p>
+        <div class="rule">
+          <p class="note">糖を逃すと内臓脂肪が増え、<br><strong>インスリン抵抗性</strong>が高くなります。<br>運動では筋肉が糖を利用します。</p>
+          <p class="note">表示上の目安：低血糖 ≤70 mg/dL<br>警戒 ≥200 mg/dL</p>
+        </div>
+        <p class="note" id="startBest">ベストスコア：0</p>
+        <button id="startBtn" class="mainBtn">スタート</button>
+      </div>
+    </div>
+
+    <div id="result" class="overlay">
+      <div class="panel">
+        <h1 id="resultTitle">結果</h1>
+        <p id="resultText"></p>
+        <button id="retryBtn" class="mainBtn">もう一度</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+"use strict";
+const screen = document.getElementById("screen");
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const $ = id => document.getElementById(id);
+const scoreEl=$("score"), highScoreEl=$("highScore"), glucoseEl=$("glucose"), timerEl=$("timer"), fatText=$("fatText"), effectText=$("effectText"), fatFill=$("fatFill");
+const exerciseBtn=$("exercise"), fireBtn=$("fire"), start=$("start"), result=$("result"), resultTitle=$("resultTitle"), resultText=$("resultText");
+let W=400,H=711,dpr=1,raf=0;
+const HIGH_SCORE_KEY = "kettouchi_control_high_score_v1";
+function loadHighScore(){
+ try{
+  const value = Number(localStorage.getItem(HIGH_SCORE_KEY));
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+ }catch(error){
+  return 0;
+ }
+}
+function saveHighScore(value){
+ try{
+  localStorage.setItem(HIGH_SCORE_KEY, String(value));
+ }catch(error){
+  // 保存が使用できない環境では、その回の表示のみ更新します。
+ }
+}
+const g={running:false,ended:false,score:0,highScore:loadHighScore(),newRecord:false,bg:100,time:60,last:0,spawn:0,shotCD:0,fat:0,exercise:0,exerciseCD:0,pulse:0,alert:"",alertLife:0,chartClock:0,chart:[]};
+const pancreas={x:200,y:570,targetX:200,w:82,h:44};
+let sugars=[],shots=[],particles=[],notes=[];
+
+function resize(){
+ const r=screen.getBoundingClientRect(); dpr=Math.min(2,window.devicePixelRatio||1);
+ canvas.width=Math.floor(r.width*dpr); canvas.height=Math.floor(r.height*dpr); ctx.setTransform(dpr,0,0,dpr,0,0);
+ W=r.width; H=r.height; pancreas.y=H*.79; pancreas.x=Math.max(54,Math.min(W-54,pancreas.x)); pancreas.targetX=pancreas.x; draw();
+}
+addEventListener("resize",resize); resize();
+
+function effectiveness(){
+ let value=g.fat<25?1:g.fat<50?.76:g.fat<75?.54:.34;
+ if(g.exercise>0)value=Math.min(1,value+.2);
+ return value;
+}
+function resistanceLabel(){
+ if(g.fat < 25) return "なし";
+ if(g.fat < 50) return "軽度";
+ if(g.fat < 75) return "中等度";
+ return "高度";
+}
+function message(text){g.alert=text;g.alertLife=1.15;}
+function reset(){
+ cancelAnimationFrame(raf);
+ Object.assign(g,{running:true,ended:false,score:0,newRecord:false,bg:100,time:60,last:performance.now(),spawn:.35,shotCD:0,fat:0,exercise:0,exerciseCD:0,pulse:0,alert:"",alertLife:0,chartClock:0,chart:Array(60).fill(100)});
+ sugars=[];shots=[];particles=[];notes=[];pancreas.x=W/2;pancreas.targetX=W/2;
+ exerciseBtn.disabled=false;exerciseBtn.classList.remove("active");exerciseBtn.textContent="運動";
+ start.style.display="none";result.style.display="none";updateHud();raf=requestAnimationFrame(loop);
+}
+$("startBest").textContent="ベストスコア："+g.highScore;
+$("startBtn").onclick=reset; $("retryBtn").onclick=reset;
+
+canvas.addEventListener("pointerdown", e=>{
+ if(!g.running)return;
+ const r=canvas.getBoundingClientRect();
+ if(e.clientY-r.top>H*.48){ canvas.setPointerCapture(e.pointerId); move(e); }
+});
+canvas.addEventListener("pointermove", e=>{if(g.running&&(e.buttons>0||e.pointerType==="touch"))move(e)});
+function move(e){ const x=e.clientX-canvas.getBoundingClientRect().left; pancreas.targetX=Math.max(48,Math.min(W-48,x)); }
+
+fireBtn.addEventListener("pointerdown", e=>{
+ e.preventDefault(); if(!g.running||g.shotCD>0)return;
+ shots.push({x:pancreas.x,y:pancreas.y-25,r:9,v:H*.84});
+ g.shotCD=.20; g.bg=Math.max(45,g.bg-1.1); burst(pancreas.x,pancreas.y-25,"#ffe279",6);
+ fireBtn.classList.add("pressed");setTimeout(()=>fireBtn.classList.remove("pressed"),80);
+});
+exerciseBtn.addEventListener("pointerdown", e=>{
+ e.preventDefault(); if(!g.running||g.exercise>0||g.exerciseCD>0)return;
+ g.exercise=5.4;g.exerciseCD=12;g.pulse=.15;exerciseBtn.classList.add("active");message("運動中：筋肉が糖を利用");
+});
+function spawnSugar(){
+ const glucose=Math.random()<.62;
+ sugars.push({x:42+Math.random()*(W-84),y:-20,r:glucose?18:16,v:H*(.18+Math.random()*.045+(60-g.time)*.001),type:glucose?"G":"F",rise:glucose?9:12,color:glucose?"#ffdf66":"#ff99bf",phase:Math.random()*6.28});
+}
+function burst(x,y,color,n){for(let i=0;i<n;i++){const a=Math.random()*6.283,s=25+Math.random()*70;particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,color,life:.45+Math.random()*.22})}}
+function note(x,y,text,color){notes.push({x,y,text,color,life:.70})}
+function hitSugar(s){
+ if(Math.random()>effectiveness()){
+  note(s.x,s.y,"効きにくい","#ffe6a6"); burst(s.x,s.y,"#ceb9a7",9); message("内臓脂肪でインスリン抵抗性↑"); return false;
+ }
+ g.score+=s.type==="G"?10:13; updateHighScoreDuringPlay(); g.bg=Math.max(48,g.bg-s.rise*.62); note(s.x,s.y,"細胞へ","#dbffb4"); burst(s.x,s.y,s.color,13); return true;
+}
+function update(dt){
+ g.time-=dt;g.shotCD=Math.max(0,g.shotCD-dt);g.alertLife=Math.max(0,g.alertLife-dt);g.exerciseCD=Math.max(0,g.exerciseCD-dt);
+ pancreas.x+=(pancreas.targetX-pancreas.x)*Math.min(1,dt*15);
+ g.spawn-=dt;if(g.spawn<=0){spawnSugar();g.spawn=Math.max(.42,.95-(60-g.time)*.008)+Math.random()*.22}
+ g.chartClock-=dt;
+ if(g.chartClock<=0){
+  g.chart.push(g.bg);
+  if(g.chart.length>60)g.chart.shift();
+  g.chartClock=.30;
+ }
+ if(g.exercise>0){
+  g.exercise=Math.max(0,g.exercise-dt);g.bg=Math.max(45,g.bg-dt*1.85);g.fat=Math.max(0,g.fat-dt*.85);g.pulse-=dt;
+  if(g.pulse<=0&&sugars.length){let j=0;for(let i=1;i<sugars.length;i++)if(sugars[i].y>sugars[j].y)j=i;const s=sugars[j];note(s.x,s.y,"筋肉へ","#baffaa");burst(s.x,s.y,"#9def8d",12);sugars.splice(j,1);g.score+=5;updateHighScoreDuringPlay();g.bg=Math.max(45,g.bg-1);g.pulse=.9}
+  if(g.exercise<=0){exerciseBtn.classList.remove("active");message("運動終了");}
+ }
+ sugars.forEach(s=>{s.y+=s.v*dt;s.phase+=dt*4;s.x+=Math.sin(s.phase)*.22});
+ shots.forEach(b=>b.y-=b.v*dt);
+ for(let bi=shots.length-1;bi>=0;bi--){
+  for(let si=sugars.length-1;si>=0;si--){
+   const b=shots[bi],s=sugars[si];
+   if(Math.hypot(b.x-s.x,b.y-s.y)<b.r+s.r){
+    const ok=hitSugar(s); if(ok)sugars.splice(si,1); else {s.y+=20;s.v*=1.06}
+    shots.splice(bi,1);break;
+   }
+  }
+ }
+ for(let i=sugars.length-1;i>=0;i--)if(sugars[i].y>H+25){
+  g.bg+=sugars[i].rise;g.fat=Math.min(100,g.fat+(sugars[i].type==="F"?12:9));burst(sugars[i].x,H-50,"#ff6670",8);message("糖が残り、内臓脂肪が増加");sugars.splice(i,1);
+ }
+ shots=shots.filter(b=>b.y>-25);
+ notes.forEach(n=>{n.life-=dt;n.y-=dt*22});notes=notes.filter(n=>n.life>0);
+ particles.forEach(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.95;p.vy*=.95});particles=particles.filter(p=>p.life>0);
+ 
+ if(g.bg>=200)finish(false,"血糖値が200以上になりました。");
+ else if(g.bg<=70)finish(false,"血糖値が70以下になりました。");
+ else if(g.time<=0)finish(g.bg>70&&g.bg<=140,g.bg>70&&g.bg<=140?"血糖値を目標範囲に保てました。":"終了時の血糖値を目標範囲に保てませんでした。");
+ updateHud();
+}
+function updateHighScoreDuringPlay(){
+ if(g.score > g.highScore){
+  g.highScore = g.score;
+  g.newRecord = true;
+  saveHighScore(g.highScore);
+ }
+}
+function updateHud(){
+ scoreEl.textContent=g.score; highScoreEl.textContent=g.highScore; glucoseEl.textContent=Math.round(g.bg); timerEl.textContent=Math.max(0,Math.ceil(g.time))+"秒";
+ fatText.textContent="内臓脂肪 "+Math.round(g.fat);effectText.textContent="インスリン抵抗性 "+resistanceLabel();fatFill.style.width=g.fat+"%";
+ if(g.exercise>0){exerciseBtn.innerHTML="運動中<br>"+Math.ceil(g.exercise)+"秒";exerciseBtn.disabled=false}
+ else if(g.exerciseCD>0){exerciseBtn.innerHTML="回復<br>"+Math.ceil(g.exerciseCD)+"秒";exerciseBtn.disabled=true}
+ else {exerciseBtn.textContent="運動";exerciseBtn.disabled=false}
+}
+function finish(clear,text){
+ if(g.ended)return;g.running=false;g.ended=true;$("startBest").textContent="ベストスコア："+g.highScore;resultTitle.textContent=clear?"ゲームクリア":"ゲームオーバー";
+ const recordText = g.newRecord ? "<br><strong style='color:#ffe079;font-size:1.15em'>新記録！</strong>" : "<br>ベストスコア："+g.highScore;
+ resultText.innerHTML=text+"<br><br>スコア："+g.score+recordText+"<br>最終血糖値："+Math.round(g.bg)+"<br>内臓脂肪："+Math.round(g.fat)+"<br>インスリン抵抗性："+resistanceLabel()+"<br>インスリンの効き："+Math.round(effectiveness()*100)+"%";
+ result.style.display="grid";
+}
+function rounded(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function vessel(){
+ const gr=ctx.createLinearGradient(0,0,W,0);gr.addColorStop(0,"#481126");gr.addColorStop(.16,"#98253f");gr.addColorStop(.5,"#bb354c");gr.addColorStop(.84,"#98253f");gr.addColorStop(1,"#481126");ctx.fillStyle=gr;ctx.fillRect(0,0,W,H);
+ ctx.fillStyle="rgba(255,195,193,.13)";ctx.beginPath();ctx.moveTo(0,0);ctx.bezierCurveTo(W*.20,H*.20,W*.05,H*.68,0,H);ctx.closePath();ctx.fill();ctx.beginPath();ctx.moveTo(W,0);ctx.bezierCurveTo(W*.80,H*.20,W*.95,H*.68,W,H);ctx.closePath();ctx.fill();
+}
+function miniGraph(){
+ const x=10, y=H*.145, w=W-20, h=112;
+ const plotLeft=x+9, plotRight=x+w-42, plotTop=y+24, plotBottom=y+h-11;
+ const min=50, max=210;
+ const sy=v=>plotBottom-(Math.max(min,Math.min(max,v))-min)/(max-min)*(plotBottom-plotTop);
+
+ ctx.save();
+ ctx.fillStyle="rgba(32,5,17,.47)";
+ rounded(x,y,w,h,12);
+ ctx.fill();
+
+ // ゲームの目標帯（70～140）
+ const bandTop=sy(140), bandBottom=sy(70);
+ ctx.fillStyle="rgba(159,232,112,.15)";
+ ctx.fillRect(plotLeft,bandTop,plotRight-plotLeft,bandBottom-bandTop);
+
+ const guides=[
+  {value:200,label:"200 警戒",color:"#ffb493"},
+  {value:140,label:"140 目標上限",color:"#d7ffa9"},
+  {value:70,label:"70 低血糖",color:"#aedcff"}
+ ];
+ guides.forEach(line=>{
+  const py=sy(line.value);
+  ctx.setLineDash([4,4]);
+  ctx.strokeStyle=line.color;
+  ctx.globalAlpha=.75;
+  ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(plotLeft,py);ctx.lineTo(plotRight,py);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha=1;
+  ctx.fillStyle=line.color;
+  ctx.font="700 9px sans-serif";
+  ctx.textAlign="left";
+  ctx.fillText(line.label,plotRight+4,py+3);
+ });
+
+ ctx.fillStyle="#fff4d2";
+ ctx.font="800 11px sans-serif";
+ ctx.textAlign="left";
+ ctx.fillText("血糖値",x+9,y+15);
+
+ ctx.strokeStyle="#ffe079";
+ ctx.lineWidth=2.5;
+ ctx.beginPath();
+ g.chart.forEach((v,i)=>{
+  const px=plotLeft+(i/Math.max(1,g.chart.length-1))*(plotRight-plotLeft);
+  const py=sy(v);
+  i?ctx.lineTo(px,py):ctx.moveTo(px,py);
+ });
+ ctx.stroke();
+
+ const currentY=sy(g.bg);
+ ctx.fillStyle="#ffe079";
+ ctx.beginPath();ctx.arc(plotRight,currentY,3.5,0,Math.PI*2);ctx.fill();
+
+ ctx.restore();
+}
+function cellsAndFat(){
+ const resistant=g.fat>=25, cellY=H*.52, r=36;
+ [{x:8,y:cellY},{x:W-8,y:H*.60}].forEach(c=>{ctx.fillStyle=resistant?"rgba(183,180,124,.72)":"rgba(156,232,129,.72)";ctx.strokeStyle=resistant?"#ffd27e":"#e2ffc7";ctx.lineWidth=resistant?4:2;ctx.beginPath();ctx.arc(c.x,c.y,r,0,Math.PI*2);ctx.fill();ctx.stroke()});
+ const count=Math.floor(g.fat/10);for(let i=0;i<count;i++){const left=i%2===0;const j=Math.floor(i/2);const x=left?24+j%2*22:W-24-j%2*22,y=H*.65-Math.floor(j/2)*25;ctx.fillStyle="#f7c653";ctx.beginPath();ctx.arc(x,y,9,0,Math.PI*2);ctx.fill()}
+}
+function drawSugar(s){
+ ctx.save();
+ ctx.translate(s.x,s.y);
+ ctx.fillStyle=s.color;
+ ctx.strokeStyle="#fff6df";
+ ctx.lineWidth=2;
+ if(s.type==="G"){
+  ctx.beginPath();
+  for(let i=0;i<6;i++){
+   const a=Math.PI/6+i*Math.PI/3;
+   i?ctx.lineTo(Math.cos(a)*s.r,Math.sin(a)*s.r):ctx.moveTo(Math.cos(a)*s.r,Math.sin(a)*s.r);
+  }
+  ctx.closePath();
+ }else{
+  ctx.beginPath();
+  ctx.arc(0,0,s.r,0,Math.PI*2);
+ }
+ ctx.fill();
+ ctx.stroke();
+ const label=s.type==="G"?"ブドウ糖":"果糖";
+ ctx.textAlign="center";
+ ctx.textBaseline="top";
+ ctx.font="800 11px sans-serif";
+ ctx.lineWidth=3;
+ ctx.strokeStyle="rgba(80,25,25,.72)";
+ ctx.strokeText(label,0,s.r+4);
+ ctx.fillStyle="#fff9e8";
+ ctx.fillText(label,0,s.r+4);
+ ctx.restore();
+}
+function drawShot(b){ctx.fillStyle="#ffe27a";ctx.strokeStyle="#fffbe1";ctx.lineWidth=2;ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();ctx.stroke()}
+function drawPancreas(){ctx.save();ctx.translate(pancreas.x,pancreas.y);ctx.fillStyle="#f3a45d";ctx.strokeStyle="#ffe1bd";ctx.lineWidth=2.5;ctx.beginPath();ctx.ellipse(0,0,pancreas.w*.52,pancreas.h*.48,-.1,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.fillStyle="#fff3da";ctx.font="800 14px sans-serif";ctx.textAlign="center";ctx.fillText("膵臓",0,pancreas.h*.86);ctx.restore()}
+function effects(){particles.forEach(p=>{ctx.globalAlpha=Math.min(1,p.life/.45);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,4,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1});notes.forEach(n=>{ctx.globalAlpha=Math.min(1,n.life/.55);ctx.fillStyle=n.color;ctx.font="800 12px sans-serif";ctx.textAlign="center";ctx.fillText(n.text,n.x,n.y);ctx.globalAlpha=1})}
+function exerciseEffect(){if(g.exercise<=0)return;ctx.fillStyle="rgba(92,218,119,.27)";rounded(W*.18,H*.69,W*.64,34,17);ctx.fill();ctx.strokeStyle="rgba(205,255,193,.78)";ctx.stroke();ctx.fillStyle="#e6ffdb";ctx.font="800 12px sans-serif";ctx.textAlign="center";ctx.fillText("筋肉が糖を利用中",W/2,H*.69+22)}
+function alert(){if(g.alertLife<=0)return;ctx.globalAlpha=Math.min(1,g.alertLife*1.3);ctx.fillStyle="rgba(34,5,16,.72)";rounded(W*.08,H*.315,W*.84,34,13);ctx.fill();ctx.fillStyle="#fff0ae";ctx.font="800 12px sans-serif";ctx.textAlign="center";ctx.fillText(g.alert,W/2,H*.315+21);ctx.globalAlpha=1}
+function draw(){
+ vessel();miniGraph();cellsAndFat();sugars.forEach(drawSugar);shots.forEach(drawShot);effects();exerciseEffect();drawPancreas();alert();
+ if(g.running&&(g.bg>160||g.bg<=80)){ctx.globalAlpha=.10;ctx.fillStyle=g.bg>160?"#ff2d31":"#56a7ff";ctx.fillRect(0,0,W,H);ctx.globalAlpha=1}
+}
+function loop(now){if(!g.running){draw();return}const dt=Math.min(.033,(now-g.last)/1000);g.last=now;update(dt);draw();if(g.running)raf=requestAnimationFrame(loop)}
+g.chart=Array(60).fill(100);updateHud();draw();
+})();
+</script>
+</body>
+</html>
